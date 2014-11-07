@@ -49,7 +49,43 @@ pod2usage(1) if ($OPT{help} || !$OPT{ped} || !$OPT{vcf} || !$OPT{vep});
 
 =head1 SYNOPSIS
 
-vasp.pl -min_num_aff min_number_of_affected_samples_variant -polyphen filter_on_polyphen_category(default=probably_damaging) -sift filter_on_sift_category(default=deleterious) -comhet only_report_comhet -max_allele_freq filter_on_allele_freq -phase_var_num min_number_variants_to_make_block(default=2) -min_phase_block min_phase_block_size(default=10kb) -denovo only_report_denovo -inheritance filter_on_inheritance_type(options=ad,ar,xd,xr) -coord genomic_coordinates(format=chr:start-end) -gene_list only_report_on_gene_in_file -chrom only_report_chr -ref ref_fasta_location -bam_list list_containing_id_and_bamfile_locations -ped ped_file -vcf input_vcf -vcf_cutoff quality_cutoff(default=20) -vep vep_annotation_file -out outfile(default=./vasp.tsv) [options]
+vasp.pl -ped ped_file -vcf input_vcf -vep vep_annotation_file
+
+[OPTIONAL ARGS]
+
+-bam_list list_containing_id_and_bamfile_locations (preferred method)
+
+-ref ref_fasta_location (required with -bam_list)
+
+-samtools samtools_path (required with -bam_list; default=/usr/bin/samtools)
+
+-vcf_cutoff quality_cutoff(default=20, ignored if no quality) 
+
+-min_num_aff min_number_of_affected_samples_variant
+
+-polyphen filter_on_polyphen_category(default=probably_damaging)
+
+-sift filter_on_sift_category(default=deleterious) 
+
+-comhet only_report_comhet 
+
+-max_allele_freq filter_on_allele_freq 
+
+-phase_var_num min_number_variants_to_make_block(default=2) 
+
+-min_phase_block min_phase_block_size(default=10kb)
+
+-denovo only_report_denovo
+
+-inheritance filter_on_inheritance_type(options=ad,ar,xd,xr) 
+
+-coord genomic_coordinates(format=chr:start-end)
+
+-gene_list only_report_on_gene_in_file 
+
+-chrom only_report_chr   
+
+-out outfile(default=./vasp.tsv) 
 
 Required flags: -ped -vep -vcf
 
@@ -65,13 +101,15 @@ vasp.pl -> wrapper script for generating pedigree summaries
 
 =head1 DESCRIPTION
 
-date
+Oct 31/2014
 
-a script that ...
+A script that summarises seqeuenced pedigrees. Takes in three required files (ped, vcf, and vep file) and many optional filters.
 
 =head1 AUTHOR
 
 Matthew Field
+
+See https://github.com/mattmattmattmatt/VASP
 
 =cut
 
@@ -313,7 +351,7 @@ if ($OPT{polyphen}) {
 }
 
 if ($OPT{sift}) {
-	my @sift_options = qw(deleterious tolerant);
+	my @sift_options = qw(deleterious tolerated);
 	my $match = 0;
 	for my $siftopt ( @sift_options ) {
 	    if ($siftopt eq $OPT{sift}) {

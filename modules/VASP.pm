@@ -1374,7 +1374,7 @@ sub generate_line_data {
 			}
 		}
 		
-		push @headers, 'mendelian_inheritance','disease_inheritance','gene','total_cohort_variants','unique_cohort_variants';
+		push @headers, 'mendelian_inheritance','disease_inheritance','gene','total_gene_variants','unique_coord_gene_variants';
 
 		if ($self->{allele_data} eq 'bam') {
 			for my $sample (sort keys %{$self->{sample_data}}) {
@@ -1395,7 +1395,7 @@ sub generate_line_data {
 			push @headers,'father_allele','parent_allele_common_to_affected','affected_allele_block','definite_compound_het','possible_compound_het';		
 		}
 	} else {
-		push @headers, 'disease_inheritance','gene','total_cohort_variants','unique_cohort_variants';
+		push @headers, 'disease_inheritance','gene','total_gene_variants','unique_coord_gene_variants';
 		if ($self->{allele_data} eq 'bam') {
 			for my $sample (sort keys %{$self->{sample_data}}) {
 				push @headers, $sample.'_pileup(zyg)';
@@ -1487,7 +1487,7 @@ sub generate_line_data {
 		my $allele_freq = $self->{var_data}{$var_key}{allele_freq};
 		my $dbsnp = exists $self->{var_data}{$var_key}{dbsnp}?$self->{var_data}{$var_key}{dbsnp}:'Novel';
 
-		push @line_data, $chr,$start,$end,$self->{var_data}{$var_key}{var_type},$event,$self->{var_data}{$var_key}{qual}, $allele_freq,$dbsnp,$self->{var_data}{$var_key}{gene},$self->{var_data}{$var_key}{vep};	
+		push @line_data, $chr,$start,$end,$self->{var_data}{$var_key}{var_type},$event,$self->{var_data}{$var_key}{qual}, $allele_freq,$dbsnp,$self->{var_data}{$var_key}{transcript},$self->{var_data}{$var_key}{vep};	
 		
 		if (exists $self->{var_data}{$var_key}{aa_change}) {
 			push @line_data, $self->{var_data}{$var_key}{aa_change};
