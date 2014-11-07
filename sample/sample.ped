@@ -1,0 +1,6 @@
+FAMILY3	Unaffected1	0	0	1	1
+FAMILY3	Unaffected2	0	0	2	1
+FAMILY3	Affected1	Unaffected1	Unaffected2	2	2
+FAMILY3 Affected2	Unaffected1	Unaffected2	2	2
+FAMILY3 Unaffected3	Unaffected1     Unaffected2     2	1
+
