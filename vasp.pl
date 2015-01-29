@@ -7,8 +7,8 @@ use Pod::Usage;
 use vars qw(%OPT);
 use FindBin qw($Bin);
 use File::Basename qw(dirname);
-use File::Spec::Functions qw(catdir);
-use lib catdir(dirname($Bin), 'perl');
+use FindBin;
+use lib "$FindBin::Bin";
 use modules::VASP;
 use modules::Exception;
 use modules::PED;
@@ -204,6 +204,10 @@ if (defined $OPT{bam_list}) {
 	
 } else {
 	$allele_data = 'vcf';
+	#Run a check to make sure the GT field is present -> needed for zygosity information if no bam files are given 
+	if (! `grep GT: $vcf_file | head -1`) {
+		modules::Exception->throw("ERROR: Can't use vcf file without GT fields; must rerun variant caller to include this information");
+	}
 }
 
 #Either get allele info from bam files via pileups or from vcf files

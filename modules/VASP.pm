@@ -70,7 +70,7 @@ sub new {
 	
 	my %parent_count = ();
 
-   	for my $ped_identifier (sort {my $a_count = split(":",$a); my $b_count = split(":",$b); $a_count<=>$b_count} keys %{$ped_data} ) {
+   	for my $ped_identifier (sort {my ($a_count) = split(":",$a); my ($b_count) = split(":",$b); $a_count<=>$b_count} keys %{$ped_data} ) {
 		my ($ped_count,$ped_id) = split(":",$ped_identifier);
 		$self->{sample_data}{$ped_id}{count} = $ped_count;
 
@@ -312,7 +312,7 @@ sub _parse_vcf {
 			
 			if ($self->{allele_data} eq 'vcf') {
 				#Need to use the sorted ped information here
-				for my $ped_key (sort {my $a_count = split(":",$a); my $b_count = split(":",$b); $a_count<=>$b_count} keys %{$self->{ped_data}}) {
+				for my $ped_key (sort {my ($a_count) = split(":",$a); my ($b_count) = split(":",$b); $a_count<=>$b_count} keys %{$self->{ped_data}}) {
 					my $zyg;
 					my ($ped_count,$ped_id) = split(":",$ped_key);
 					my $affected = $self->{ped_data}{$ped_key}{affected}?1:0;
@@ -403,8 +403,7 @@ sub _parse_vep {
 		}
 		
 		if ($self->{filter_output} && exists $self->{filters}{chrom}) {
-			#Save filtering for the end to allow for comhet and phase blocks stats to be accurate
-			#Ok to filter here as above measures will occur within single chromosome
+			#In general save filtering for the end to allow for comhet and phase blocks stats to be accurate but ok to filter here as above measures will occur within single chromosome
 			next unless $self->{filters}{chrom} eq $chr;
 		}
 		
@@ -951,7 +950,7 @@ sub get_compound_het {
 	
 	
 	#Then update the var_data fields with this info
-	for my $var_key (keys $self->{var_data}) {				
+	for my $var_key (keys %{$self->{var_data}}) {				
 		my $def_com_het = 'No';	
 		my $pos_com_het = 'No';
 		my $inheritance = $self->{var_data}{$var_key}{dis_inh};
@@ -1412,7 +1411,7 @@ sub generate_line_data {
 			
 	$self->{headers} = \@headers;
 	#print Dumper \@headers;
-	for my $var_key (keys $self->{var_data}) {
+	for my $var_key (keys %{$self->{var_data}}) {
 		my @line_data = (); #build up the lines
 		my %variant_samples = ();
 		my $aff_count = 0;
@@ -1518,7 +1517,7 @@ sub generate_line_data {
 		
 	
 		
-		my $var_count = keys $self->{var_data};
+		my $var_count = keys %{$self->{var_data}};
 	   	
 	   	if ($var_count == 0) {
 	   		modules::Exception->warning("All variants are filtered out; please rerun with different filters");
@@ -1539,37 +1538,53 @@ sub generate_line_data {
 #sort lines and write to file
 sub write_to_files {
 	my ($self) = @_;
+	(my $out_nosuffix = $self->{out}) =~ s/.tsv//;
 		
-	my $out = $self->{out};	
-		
-	open(OUT,">$out") || modules::Exception->throw("Can't open file to write $out\n");
 	my $header_line = join("\t",@{$self->{headers}});
-	print OUT $header_line . "\n\n";
-	
-	
+		
 	#Sort by non-mendelian first; then highest likely affected variant and lowest unaffected non-variant 
-	for my $pass (sort {$b<=>$a} keys %{$self->{lines}}) {
-		if ($pass == 1) {
-			print OUT "\nNOVEL/RARE VARIANTS\n\n";
-		} else {
-			print OUT "\n\nCOMMON VARIANTS\n\n";
-		}
-		for my $aff_count (sort {$b<=>$a} keys %{$self->{lines}{$pass}}) {
-			for my $unaff_count (sort {$a<=>$b} keys %{$self->{lines}{$pass}{$aff_count}}) {
-				for my $dbsnp_freq (sort {$a<=>$b} keys %{$self->{lines}{$pass}{$aff_count}{$unaff_count}}) {
-					for my $chr (sort {$a cmp $b} keys %{$self->{lines}{$pass}{$aff_count}{$unaff_count}{$dbsnp_freq}}) {
-						for my $coord (sort {$a<=>$b} keys %{$self->{lines}{$pass}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}}) {
+	
+	if (exists $self->{lines}{1}) {
+		my $pass_outfile = $out_nosuffix.'.novel_rare.tsv';
+		open(PASS,">$pass_outfile") || modules::Exception->throw("Can't open file to write $pass_outfile\n");
+		print PASS $header_line . "\n\n";
+		for my $aff_count (sort {$b<=>$a} keys %{$self->{lines}{1}}) {
+			for my $unaff_count (sort {$a<=>$b} keys %{$self->{lines}{1}{$aff_count}}) {
+				for my $dbsnp_freq (sort {$a<=>$b} keys %{$self->{lines}{1}{$aff_count}{$unaff_count}}) {
+					for my $chr (sort {$a cmp $b} keys %{$self->{lines}{1}{$aff_count}{$unaff_count}{$dbsnp_freq}}) {
+						for my $coord (sort {$a<=>$b} keys %{$self->{lines}{1}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}}) {
 							#print "Pass $pass Aff $aff_count Unaff $unaff_count dbsnp $dbsnp_freq Chr $chr Coord $coord\n";
-							print OUT $self->{lines}{$pass}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}{$coord}. "\n";
+							print PASS $self->{lines}{1}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}{$coord}. "\n";
 						}
 					}
 				}
 			}
 		}
+	
+		close PASS;
 	}
 	
-	close OUT;
-	
+	if (exists $self->{lines}{0}) {
+		my $common_outfile = $out_nosuffix.'.common.tsv';
+		open(COMMON,">$common_outfile") || modules::Exception->throw("Can't open file to write $common_outfile\n");
+		print COMMON $header_line . "\n\n";
+		
+		#Sort by non-mendelian first; then highest likely affected variant and lowest unaffected non-variant 
+		
+		for my $aff_count (sort {$b<=>$a} keys %{$self->{lines}{0}}) {
+			for my $unaff_count (sort {$a<=>$b} keys %{$self->{lines}{0}{$aff_count}}) {
+				for my $dbsnp_freq (sort {$a<=>$b} keys %{$self->{lines}{0}{$aff_count}{$unaff_count}}) {
+					for my $chr (sort {$a cmp $b} keys %{$self->{lines}{0}{$aff_count}{$unaff_count}{$dbsnp_freq}}) {
+						for my $coord (sort {$a<=>$b} keys %{$self->{lines}{0}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}}) {
+							#print "Pass $pass Aff $aff_count Unaff $unaff_count dbsnp $dbsnp_freq Chr $chr Coord $coord\n";
+							print COMMON $self->{lines}{0}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}{$coord}. "\n";
+						}
+					}
+				}
+			}
+		}
+		close COMMON;
+		}
 }
 	
 
