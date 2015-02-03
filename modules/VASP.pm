@@ -120,6 +120,8 @@ sub new {
    		$vcf_cutoff = 20;
    	}
    	
+   	
+   	
 	
    	
    	#Parse the optional output filters
@@ -187,6 +189,11 @@ sub new {
    		$filter_output = 1;
    		$self->{filters}{polyphen} = $args{-polyphen};
    	} 
+   	
+   	if (exists $args{-min_read_depth}) {
+   		$filter_output = 1;
+   		$self->{filters}{min_read_depth} = $args{-min_read_depth};
+   	}
    	
    	if ($filter_output) {
    		$self->{filter_output} = 1;
@@ -375,7 +382,7 @@ sub _parse_vcf {
 						#Here we have AD (allele depth info) -> allow multiple alleles
 						my $allele_str = $ref . ','. $var_str;
 						my @alleles = split(",",$allele_str);
-						
+						my $read_depth = 0;
 						my @allele_values = split(",",$gt_values[$ad_index]);
 						my @allele_pairs = ();
 						for ( my $allele_count = 0 ; $allele_count < @alleles ; $allele_count++ ) {
@@ -384,9 +391,11 @@ sub _parse_vcf {
 							} else {
 							    push @allele_pairs,$alleles[$allele_count].':'.$allele_values[$allele_count];
 							}
+							$read_depth += $allele_values[$allele_count] if $allele_values[$allele_count] =~ /\d/;
 						}
 						my $final_allele_str = join("_",@allele_pairs);
 						$self->{var_data}{$var_key}{vcf_str}{$ped_id} = $final_allele_str;
+						$self->{var_data}{$var_key}{read_depth}{$ped_id} = $read_depth;
 					}
 					
 					$self->{var_data}{$var_key}{zyg}{$ped_id} = $zyg;
@@ -521,6 +530,10 @@ sub _parse_vep {
 		   		#update hgnc gene info
 		   		$self->{var_data}{$var_key}{hgnc} = $1;
 		   		$self->{gene_data}{$ens_gene}{hgnc} = $1;
+		   } elsif ($attribute_pair =~ /SYMBOL=(.*)/) {
+		   		#update hgnc gene info
+		   		$self->{var_data}{$var_key}{hgnc} = $1;
+		   		$self->{gene_data}{$ens_gene}{hgnc} = $1;
 		   } 
 		    
 		}
@@ -633,7 +646,7 @@ sub generate_pileups {
 		open(PILEUP,"$pileup_file") || modules::Exception->throw("Can't open pileup file $pileup_file");
 		while (<PILEUP>) {
 			my @fields = split("\t");
-			my ($pileup_string,$zyg) = modules::Utils->pileup_string($fields[4]);
+			my ($pileup_string,$zyg,$read_depth) = modules::Utils->pileup_string($fields[4]);
 			
 			my $var_key_lookup = $pileup_lookup{$fields[0].':'.$fields[1]};	
 				
@@ -647,7 +660,7 @@ sub generate_pileups {
 				}
 				next; 
 			}
-				
+			$self->{var_data}{$var_key_lookup}{read_depth}{$sample} = $read_depth;	
 			$self->{var_data}{$var_key_lookup}{pileup_str}{$sample} = $pileup_string;
 			if ($zyg ne 'ref') {
 				if ($self->{sample_data}{$sample}{affected}) {
@@ -1288,7 +1301,6 @@ sub filter_results {
 		
 		for my $var_key (keys %{$self->{var_data}}) {
 			my ($chr,$start,$end) = $var_key =~ /([0-9XYMT]+):(\d+)\-(\d+)/;
-			
 			#Filter by chr; should be handled in parse_vep and parse_vcf
 			if (exists $self->{filters}{chrom} && $self->{filters}{chrom} ne $chr) {
 				delete $self->{var_data}{$var_key};
@@ -1311,6 +1323,20 @@ sub filter_results {
 			if (exists $self->{filters}{max_allele_freq} && $self->{var_data}{$var_key}{allele_freq} ne 'N/A' && $self->{filters}{max_allele_freq} <= $self->{var_data}{$var_key}{allele_freq}) {
 				delete $self->{var_data}{$var_key};
 				next;
+			}
+			
+			#Remove cases without enough reads
+			if (exists $self->{filters}{min_read_depth}) {
+				#Here we need to check all sample values
+				my $fail = 0;
+				for my $sample (keys %{$self->{var_data}{$var_key}{read_depth}}) {
+					if ($self->{var_data}{$var_key}{read_depth}{$sample} < $self->{filters}{min_read_depth}) {
+						delete $self->{var_data}{$var_key};
+						$fail = 1;
+						last;
+					}
+				}
+				next if $fail;
 			}
 			
 			#Filter out cases without polyphen when polyphen filter applied
@@ -1407,7 +1433,8 @@ sub generate_line_data {
 	
 	#print Dumper $self;
 	
-	my @headers = qw(variant_samples);
+	my @headers = qw(category variant_samples);
+	
 	
 	if ($self->{total_affected}) {
 		push @headers, 'number_affected_variant/total_affected';
@@ -1568,13 +1595,18 @@ sub generate_line_data {
 			push @line_data, "N/A";
 		}
 		
-		my $pass = 0;
-		
+		my $pass;
 		if ($allele_freq eq 'N/A') {
-			$pass = -1; #inconclusive cases go in separate files
+			if ($dbsnp eq 'Novel') {
+				$pass = 1; #Novel cases highest priority
+			} else {
+				$pass = 3; #inconclusive cases go in separate files
+			}
 			$allele_freq = -1; #For sorting
 		} elsif ($allele_freq <= 0.02) {
-			$pass = 1;
+			$pass = 2; #Rare case
+		} else {
+			$pass = 4; #Common case
 		}
 		
 		
@@ -1599,73 +1631,41 @@ sub generate_line_data {
 #sort lines and write to file
 sub write_to_files {
 	my ($self) = @_;
-	(my $out_nosuffix = $self->{out}) =~ s/.tsv//;
+	my $out = $self->{out};
 		
 	my $header_line = join("\t",@{$self->{headers}});
-		
-	#Sort by non-mendelian first; then highest likely affected variant and lowest unaffected non-variant 
+	open(OUT,">$out") || modules::Exception->throw("Can't open file to write $out\n");
 	
-	if (exists $self->{lines}{1}) {
-		my $pass_outfile = $out_nosuffix.'.novel_rare.tsv';
-		open(PASS,">$pass_outfile") || modules::Exception->throw("Can't open file to write $pass_outfile\n");
-		print PASS $header_line . "\n\n";
-		for my $aff_count (sort {$b<=>$a} keys %{$self->{lines}{1}}) {
-			for my $unaff_count (sort {$a<=>$b} keys %{$self->{lines}{1}{$aff_count}}) {
-				for my $dbsnp_freq (sort {$a<=>$b} keys %{$self->{lines}{1}{$aff_count}{$unaff_count}}) {
-					for my $chr (sort {$a cmp $b} keys %{$self->{lines}{1}{$aff_count}{$unaff_count}{$dbsnp_freq}}) {
-						for my $coord (sort {$a<=>$b} keys %{$self->{lines}{1}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}}) {
+	#Sort by novel/no_freq/and common first, then non-mendelian, then highest likely affected variant and lowest unaffected non-variant 
+	print OUT $header_line . "\n\n";
+	
+	for my $pass (sort {$a<=>$b} keys %{$self->{lines}}) {
+		my $pass_string;
+		if ($pass == 1) {
+			$pass_string = 'NOVEL';
+		} elsif ($pass == 2) {
+			$pass_string = 'RARE';
+		} elsif ($pass == 3) {
+			$pass_string = 'NO_FREQ';
+		} else {
+			$pass_string = 'COMMON';
+		}
+	
+		for my $aff_count (sort {$b<=>$a} keys %{$self->{lines}{$pass}}) {
+			for my $unaff_count (sort {$a<=>$b} keys %{$self->{lines}{$pass}{$aff_count}}) {
+				for my $dbsnp_freq (sort {$a<=>$b} keys %{$self->{lines}{$pass}{$aff_count}{$unaff_count}}) {
+					for my $chr (sort {$a cmp $b} keys %{$self->{lines}{$pass}{$aff_count}{$unaff_count}{$dbsnp_freq}}) {
+						for my $coord (sort {$a<=>$b} keys %{$self->{lines}{$pass}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}}) {
 							#print "Pass $pass Aff $aff_count Unaff $unaff_count dbsnp $dbsnp_freq Chr $chr Coord $coord\n";
-							print PASS $self->{lines}{1}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}{$coord}. "\n";
+							print OUT join("\t",$pass_string,$self->{lines}{$pass}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}{$coord}). "\n";
 						}
 					}
 				}
 			}
 		}
-	
-		close PASS;
 	}
+	close OUT;
 	
-	if (exists $self->{lines}{-1}) {
-		my $nofreq_outfile = $out_nosuffix.'.no_freq.tsv';
-		open(NOFREQ,">$nofreq_outfile") || modules::Exception->throw("Can't open file to write $nofreq_outfile\n");
-		print NOFREQ $header_line . "\n\n";
-		for my $aff_count (sort {$b<=>$a} keys %{$self->{lines}{-1}}) {
-			for my $unaff_count (sort {$a<=>$b} keys %{$self->{lines}{-1}{$aff_count}}) {
-				for my $dbsnp_freq (sort {$a<=>$b} keys %{$self->{lines}{-1}{$aff_count}{$unaff_count}}) {
-					for my $chr (sort {$a cmp $b} keys %{$self->{lines}{-1}{$aff_count}{$unaff_count}{$dbsnp_freq}}) {
-						for my $coord (sort {$a<=>$b} keys %{$self->{lines}{-1}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}}) {
-							#print "Pass $pass Aff $aff_count Unaff $unaff_count dbsnp $dbsnp_freq Chr $chr Coord $coord\n";
-							print NOFREQ $self->{lines}{-1}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}{$coord}. "\n";
-						}
-					}
-				}
-			}
-		}
-	
-		close NOFREQ;
-	}
-	
-	if (exists $self->{lines}{0}) {
-		my $common_outfile = $out_nosuffix.'.common.tsv';
-		open(COMMON,">$common_outfile") || modules::Exception->throw("Can't open file to write $common_outfile\n");
-		print COMMON $header_line . "\n\n";
-		
-		#Sort by non-mendelian first; then highest likely affected variant and lowest unaffected non-variant 
-		
-		for my $aff_count (sort {$b<=>$a} keys %{$self->{lines}{0}}) {
-			for my $unaff_count (sort {$a<=>$b} keys %{$self->{lines}{0}{$aff_count}}) {
-				for my $dbsnp_freq (sort {$a<=>$b} keys %{$self->{lines}{0}{$aff_count}{$unaff_count}}) {
-					for my $chr (sort {$a cmp $b} keys %{$self->{lines}{0}{$aff_count}{$unaff_count}{$dbsnp_freq}}) {
-						for my $coord (sort {$a<=>$b} keys %{$self->{lines}{0}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}}) {
-							#print "Pass $pass Aff $aff_count Unaff $unaff_count dbsnp $dbsnp_freq Chr $chr Coord $coord\n";
-							print COMMON $self->{lines}{0}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}{$coord}. "\n";
-						}
-					}
-				}
-			}
-		}
-		close COMMON;
-		}
 }
 	
 

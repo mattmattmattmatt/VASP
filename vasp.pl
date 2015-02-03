@@ -38,6 +38,7 @@ GetOptions(\%OPT,
 	   "sift=s",
 	   "polyphen=s",
 	   "min_num_aff=i",
+	   "min_read_depth=i",
 	   "ref_fasta=s",
 	   "debug"
 	   ) || modules::Exception->throw("Invalid command-line option for script\n");
@@ -92,6 +93,8 @@ Required flags: -ped -vcf (-vep or -vep_bin)
 -gene_list only_report_on_gene_in_file 
 
 -chrom only_report_chr   
+
+-min_read_depth ignore_variants_where_one_or_more_pedigree_members_has_less_than_this_read_depth
 
 -out outfile(default=./vasp.tsv) 
 
@@ -211,6 +214,12 @@ if (defined $OPT{bam_list}) {
 	if (! `grep GT: $vcf_file | head -1`) {
 		modules::Exception->throw("ERROR: Can't use vcf file without GT fields; must rerun variant caller to include this information");
 	}
+	#Check we have AD info here or else we can't use this filter
+	if ($OPT{min_read_depth}) {
+		if (! `grep :AD $vcf_file | head -1`) {
+			modules::Exception->throw("ERROR: Can't use vcf file without AD fields when using -min_read_depth");
+		}
+	}
 }
 
 my $vep_file;
@@ -255,7 +264,8 @@ if ($OPT{vep}) {
 							"--gmaf", #Get gmaf frequencies
 							"--cache", #use the local cached files
 							"--offline", #prevents all db access
-							"--output_file $vep_out" #output file to pass to VASP module
+							"--output_file $vep_out", #output file to pass to VASP module,
+							"--symbol" #Get hgnc symbols for gene names
 						   );
 	if ($OPT{vep_extra}) {
 		$vep_command .= " $OPT{vep_extra}";
@@ -320,12 +330,20 @@ if (defined $OPT{coord}) {
 	$filter_flag = 1;
 }
 
-if (defined $OPT{min_phase_block}) {
-	$args{-phase_block_size} = $OPT{min_phase_block}
+if (defined $OPT{min_read_depth}) {
+	$args{-min_read_depth} = $OPT{min_read_depth};
+	$filter_flag = 1;
 } 
+
+if (defined $OPT{min_phase_block}) {
+	$args{-phase_block_size} = $OPT{min_phase_block};
+	$filter_flag = 1;
+} 
+
 
 if (defined $OPT{phase_var_num}) {
 	$args{-phase_var_num} = $OPT{phase_var_num};
+	$filter_flag = 1;
 } 
 
 
