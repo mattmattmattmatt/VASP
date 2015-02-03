@@ -38,7 +38,7 @@ sub new {
    			$self->{sample_data}{$sample_id}{bam} = $bam_file;
    		}
    		$self->{samtools} = $args{-samtools};
-   		$self->{ref} = $args{-ref};
+   		$self->{ref_fasta} = $args{-ref_fasta};
    	}
    
    	
@@ -204,9 +204,11 @@ sub new {
    	$self->_parse_vep(-vep_file=>$args{-vep_file});
    	print "Parsing vcf...\n";   	
    	$self->_parse_vcf(-vcf_file=>$args{-vcf_file},-vcf_cutoff=>$vcf_cutoff);
-   	
+   	$self->{vcf} = $args{-vcf_file};
     return $self;
 }
+
+
 
 sub _parse_vcf {
     my ($self, @args) = @_;
@@ -239,7 +241,9 @@ sub _parse_vcf {
     	chomp;
     	
     	
-    	my ($chr,$first_coord,undef,$ref,$var_str,$qual,undef,$rest,$gt_fields,@ped_alleles) = split;
+    	my ($chr,$first_coord,$known,$ref,$var_str,$qual,undef,$rest,$gt_fields,@ped_alleles) = split;
+    	
+    
     	
     	if ($chr eq 'MT') {
 			$chr = 'M';
@@ -266,8 +270,11 @@ sub _parse_vcf {
 
 		my @vars = split(",",$var_str);
 		
+		
 		for my $var ( @vars ) {
 			my ($var_key,$var_type) = _get_variant_key(-type=>'vcf',-chrom=>$chr,-first=>$first_coord,-ref_seq=>$ref,-var_seq=>$var);
+	
+
 
 
 			my ($start,$end) = $var_key =~ /(\d+)-(\d+)/;
@@ -291,6 +298,11 @@ sub _parse_vcf {
 				next;
 			}
 
+			#If no rs info available from vep file
+			if ($known =~ /rs/ && !exists $self->{var_data}{$var_key}{dbsnp}) {
+				$self->{var_data}{$var_key}{dbsnp} = $known;
+			}
+
 
 			my $length_ref = length($ref);
 			my $length_var = length($var);
@@ -311,16 +323,31 @@ sub _parse_vcf {
 			$self->{var_data}{$var_key}{unaff_count} = 0;
 			
 			if ($self->{allele_data} eq 'vcf') {
+				
+				#Check if there is allele depth information
+				my $ad_index = -1;
+				my @gt_fields = split(":",$gt_fields);
+				my $count = 0;
+				for my $gt_field ( @gt_fields ) {
+				    if ($gt_field eq 'AD') {
+				    	$ad_index = $count;
+				    }
+				    $count++;
+				}
+				
 				#Need to use the sorted ped information here
 				for my $ped_key (sort {my ($a_count) = split(":",$a); my ($b_count) = split(":",$b); $a_count<=>$b_count} keys %{$self->{ped_data}}) {
 					my $zyg;
 					my ($ped_count,$ped_id) = split(":",$ped_key);
 					my $affected = $self->{ped_data}{$ped_key}{affected}?1:0;
 					my $ped_lookup = $ped_count-1;
+
+					my @gt_values = split(":",$ped_alleles[$ped_lookup]);
+
 					if ($ped_alleles[$ped_lookup] eq '.') {
 						$zyg = 'ref';
 					} else {
-						my ($alleles) = split(':',$ped_alleles[$ped_lookup]);
+						my ($alleles) = $gt_values[0];
 						my ($allele1,$allele2) = split('/',$alleles);
 						if ($alleles eq '0/0' || $alleles eq '.') {
 							$zyg = 'ref';
@@ -342,6 +369,26 @@ sub _parse_vcf {
 							modules::Exception->throw("ERROR: Can't parse zygosity from $alleles for line $_");
 						}
 					}
+					
+					#Get allele info from vcf if available and not using BAM
+					if ($ad_index != -1 && exists $gt_values[$ad_index]) {
+						#Here we have AD (allele depth info) -> allow multiple alleles
+						my $allele_str = $ref . ','. $var_str;
+						my @alleles = split(",",$allele_str);
+						
+						my @allele_values = split(",",$gt_values[$ad_index]);
+						my @allele_pairs = ();
+						for ( my $allele_count = 0 ; $allele_count < @alleles ; $allele_count++ ) {
+							if ($alleles[$allele_count] eq $ref) {
+								push @allele_pairs,'ref:'.$allele_values[$allele_count];								
+							} else {
+							    push @allele_pairs,$alleles[$allele_count].':'.$allele_values[$allele_count];
+							}
+						}
+						my $final_allele_str = join("_",@allele_pairs);
+						$self->{var_data}{$var_key}{vcf_str}{$ped_id} = $final_allele_str;
+					}
+					
 					$self->{var_data}{$var_key}{zyg}{$ped_id} = $zyg;
 				}
 			}
@@ -380,6 +427,8 @@ sub _parse_vep {
 		next unless $_ =~ /\w/;
 		
 		my ($identifier, $coord_str, $var_base, $ens_gene, $ens_transcript, $classifier, $aa_type, undef, undef, undef, $aa_change, $codon_change, $rs, $attribute_str ) = split /\t/;
+		
+		
 		
 		#Only record results from canonical transcripts
 		next unless $attribute_str =~ /CANONICAL/; 
@@ -563,7 +612,7 @@ sub generate_pileups {
 		$pileup_lookup{"$chr:$pileup_coord"} = $var_key;
 	}
 	my $sys_call = modules::SystemCall->new();
-	my $ref = $self->{ref};
+	my $ref_fasta = $self->{ref_fasta};
 	
 	
 	for my $sample (keys %{$self->{sample_data}}) {
@@ -573,8 +622,14 @@ sub generate_pileups {
 		my $pileup_file = $bamdir . '/' . $sample . '.pileup';
 		my $samtools_bin = $self->{samtools};
 		
-		my $mpileup_snv_command = "$samtools_bin mpileup -A -E  -l $pileup_coord_file -f $ref $bam_file  > $pileup_file";
-		$sys_call->run($mpileup_snv_command) unless -e $pileup_file; #Don't run longish command if already run
+		my $mpileup_snv_command = "$samtools_bin mpileup -A -E  -l $pileup_coord_file -f $ref_fasta $bam_file  > $pileup_file";
+		if (-e $pileup_file) {
+			#Don't run longish command if already run
+			print "Skip generating pileup $pileup_file as already exists; Please remove to regenerate\n";
+		} else {
+			$sys_call->run($mpileup_snv_command); 
+		}
+		
 		open(PILEUP,"$pileup_file") || modules::Exception->throw("Can't open pileup file $pileup_file");
 		while (<PILEUP>) {
 			my @fields = split("\t");
@@ -1462,7 +1517,14 @@ sub generate_line_data {
 			}
 		} else {
 			for my $sample (sort keys %{$self->{sample_data}}) {
-				push @line_data, $self->{var_data}{$var_key}{zyg}{$sample};			
+				my $vcf_zyg;
+				#print Dumper $self->{var_data}{$var_key};
+				if (exists $self->{var_data}{$var_key}{vcf_str} && exists $self->{var_data}{$var_key}{vcf_str}{$sample}) {
+					$vcf_zyg = $self->{var_data}{$var_key}{vcf_str}{$sample} .'('.$self->{var_data}{$var_key}{zyg}{$sample}.')';
+				} else {
+					$vcf_zyg = $self->{var_data}{$var_key}{zyg}{$sample}
+				}
+				push @line_data, $vcf_zyg;			
 			}
 		}
 		
@@ -1508,14 +1570,13 @@ sub generate_line_data {
 		
 		my $pass = 0;
 		
-		if ($allele_freq eq 'N/A' || $allele_freq <= 0.02) {
+		if ($allele_freq eq 'N/A') {
+			$pass = -1; #inconclusive cases go in separate files
+			$allele_freq = -1; #For sorting
+		} elsif ($allele_freq <= 0.02) {
 			$pass = 1;
 		}
-		if ($allele_freq eq 'N/A') {
-			$allele_freq = -1; #For sorting
-		}
 		
-	
 		
 		my $var_count = keys %{$self->{var_data}};
 	   	
@@ -1562,6 +1623,26 @@ sub write_to_files {
 		}
 	
 		close PASS;
+	}
+	
+	if (exists $self->{lines}{-1}) {
+		my $nofreq_outfile = $out_nosuffix.'.no_freq.tsv';
+		open(NOFREQ,">$nofreq_outfile") || modules::Exception->throw("Can't open file to write $nofreq_outfile\n");
+		print NOFREQ $header_line . "\n\n";
+		for my $aff_count (sort {$b<=>$a} keys %{$self->{lines}{-1}}) {
+			for my $unaff_count (sort {$a<=>$b} keys %{$self->{lines}{-1}{$aff_count}}) {
+				for my $dbsnp_freq (sort {$a<=>$b} keys %{$self->{lines}{-1}{$aff_count}{$unaff_count}}) {
+					for my $chr (sort {$a cmp $b} keys %{$self->{lines}{-1}{$aff_count}{$unaff_count}{$dbsnp_freq}}) {
+						for my $coord (sort {$a<=>$b} keys %{$self->{lines}{-1}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}}) {
+							#print "Pass $pass Aff $aff_count Unaff $unaff_count dbsnp $dbsnp_freq Chr $chr Coord $coord\n";
+							print NOFREQ $self->{lines}{-1}{$aff_count}{$unaff_count}{$dbsnp_freq}{$chr}{$coord}. "\n";
+						}
+					}
+				}
+			}
+		}
+	
+		close NOFREQ;
 	}
 	
 	if (exists $self->{lines}{0}) {

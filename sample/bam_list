@@ -1,0 +1,5 @@
+Unaffected1 ./sample/Unaffected1.bam
+Unaffected2 ./sample/Unaffected2.bam
+Affected1 ./sample/Affected1.bam
+Affected2 ./sample/Affected1.bam
+Unaffected3 ./sample/Unaffected3.bam
