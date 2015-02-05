@@ -107,13 +107,13 @@ Required flags: -ped -vcf (-vep or -vep_bin)
 
 =head1 NAME
 
-vasp.pl -> wrapper script for generating pedigree summaries
+vasp.pl -> script for generating pedigree variant summaries
 
 =head1 DESCRIPTION
 
 Oct 31/2014
 
-A script that summarises seqeuenced pedigrees. Takes in three required files (ped, vcf, and vep file) and many optional filters.
+A script that summarises seqeuenced pedigrees. Takes in three required files (ped, vcf, and vep file or vep binary) and many optional filters.
 
 =head1 AUTHOR
 
@@ -237,7 +237,7 @@ if ($OPT{vep}) {
 
 	#Check format is default; don't support json or vcf format
 	if (!&check_vep($vep_file)) {
-		modules::Exception->throw("ERROR: vep file must be in ensembl default format; please rerun vep using '--convert ensembl' to convert vcf");
+		modules::Exception->throw("ERROR: vep file must be in ensembl default format; please rerun vep using default output formats");
 	}
 	
 } elsif ($OPT{vep_bin}) {
@@ -248,11 +248,7 @@ if ($OPT{vep}) {
 		modules::Exception->throw("ERROR: Problem with variant_effect_predictor.pl script");
 	}
 	
-	(my $vep_out = $vcf_file) =~ s/vcf/vep/; 
-	
-	if (-e $vep_out) {
-		modules::Exception->throw("ERROR: vep outfile $vep_out already exists; please remove this file before proceeding");
-	}
+	(my $vep_out = $vcf_file) =~ s/.vcf/_new.vep/;  #don't overwrite existing test files
 	
 	my $vep_command = join(" ",
 							$vep_bin,
@@ -265,14 +261,16 @@ if ($OPT{vep}) {
 							"--cache", #use the local cached files
 							"--offline", #prevents all db access
 							"--output_file $vep_out", #output file to pass to VASP module,
-							"--symbol" #Get hgnc symbols for gene names
+							"--symbol", #Get hgnc symbols for gene names
+							"--force_overwrite" #prevent problems with having to remove files
 						   );
 	if ($OPT{vep_extra}) {
 		$vep_command .= " $OPT{vep_extra}";
 	}
 	
 	print "Running the following command\n$vep_command\n";
-	system($vep_command);
+	my $sys_call = modules::SystemCall->new();
+	$sys_call->run($vep_command);
 	$args{-vep_file} = $vep_out;
 } else {
 	modules::Exception->throw("ERROR: Need to pass either -vep or -vep_bin and -vep_dir together");
