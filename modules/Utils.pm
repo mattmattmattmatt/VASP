@@ -5,7 +5,7 @@ use modules::Exception;
 use Data::Dumper;
 
 sub pileup_string {
-	my ( $self, $pileup_str ) = @_;
+	my ( $self, $pileup_str, $hom_cutoff, $ref_cutoff ) = @_;
 	my @bases = split("",uc($pileup_str));
     my $count = 0;
     my $allele_count = 0;
@@ -49,9 +49,9 @@ sub pileup_string {
     my @pileup_strings;
     for my $allele (sort {$final_bases{$b}<=>$final_bases{$a}} keys %final_bases) {
     	#Simply hom test (90% non reference allele) and REF test
-    	if ($final_bases{$allele}/$allele_count >= 0.9 && $allele ne 'ref') {
+    	if ($final_bases{$allele}/$allele_count >= $hom_cutoff && $allele ne 'ref') {
     		$zyg = 'hom';
-    	} elsif ($final_bases{$allele}/$allele_count >= 0.9 && $allele eq 'ref') {
+    	} elsif ($final_bases{$allele}/$allele_count >= $ref_cutoff && $allele eq 'ref') {
     		$zyg = 'ref';
     	}
     	

@@ -40,6 +40,8 @@ GetOptions(\%OPT,
 	   "min_num_aff=i",
 	   "min_read_depth=i",
 	   "ref_fasta=s",
+	   "ref_cutoff=f",
+	   "hom_cutoff=f",
 	   "debug"
 	   ) || modules::Exception->throw("Invalid command-line option for script\n");
 
@@ -96,6 +98,10 @@ Required flags: -ped -vcf (-vep or -vep_bin)
 
 -min_read_depth ignore_variants_where_one_or_more_pedigree_members_has_less_than_this_read_depth
 
+-ref_cutoff frequency_reference_base_to_call_reference(default=0.9)
+
+-hom_cutoff frequency_single_variant_base_to_call_homozygous(default=0.9)
+
 -out outfile(default=./vasp.tsv) 
 
 
@@ -140,6 +146,9 @@ my $ped_file = $OPT{ped};
 if ( !-e $ped_file ) {
 	modules::Exception->throw("File $ped_file doesn't exist");	
 }
+
+
+
 
 
 
@@ -399,6 +408,26 @@ if ($OPT{vep}) {
 	if (! `grep CANONICAL $vep_file | head -1`) {
 		modules::Exception->throw("ERROR: Can't use vep file as canonical genes not annotated; must rerun with --canonical flag");
 	}
+}
+
+#Get the homozygosity cutoff
+if ($OPT{hom_cutoff}) {
+	if ($OPT{hom_cutoff} >= 0 && $OPT{hom_cutoff} <= 1) {
+		$args{-hom_cutoff} = $OPT{hom_cutoff};
+	} else {
+		modules::Exception->throw("ERROR: hom_cutoff must be between 0 and 1");
+	}
+	
+}
+
+#Get the homozygosity cutoff
+if ($OPT{ref_cutoff}) {
+	if ($OPT{ref_cutoff} >= 0 && $OPT{ref_cutoff} <= 1) {
+		$args{-ref_cutoff} = $OPT{ref_cutoff};
+	} else {
+		modules::Exception->throw("ERROR: ref_cutoff must be between 0 and 1");
+	}
+	
 }
 
 

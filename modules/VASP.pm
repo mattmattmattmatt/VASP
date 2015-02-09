@@ -120,9 +120,17 @@ sub new {
    		$vcf_cutoff = 20;
    	}
    	
+   	if (exists $args{-hom_cutoff}) {
+   		$self->{hom_cutoff} = $args{-hom_cutoff};
+   	} else {
+   		$self->{hom_cutoff} = 0.9;
+   	}
    	
-   	
-	
+	if (exists $args{-ref_cutoff}) {
+   		$self->{ref_cutoff} = $args{-ref_cutoff};
+   	} else {
+   		$self->{ref_cutoff} = 0.9;
+   	}
    	
    	#Parse the optional output filters
    	my $filter_output = 0;
@@ -646,7 +654,8 @@ sub generate_pileups {
 		open(PILEUP,"$pileup_file") || modules::Exception->throw("Can't open pileup file $pileup_file");
 		while (<PILEUP>) {
 			my @fields = split("\t");
-			my ($pileup_string,$zyg,$read_depth) = modules::Utils->pileup_string($fields[4]);
+			#Generate sequence and zygosity info from pileup string
+			my ($pileup_string,$zyg,$read_depth) = modules::Utils->pileup_string($fields[4],$self->{hom_cutoff},$self->{ref_cutoff});
 			
 			my $var_key_lookup = $pileup_lookup{$fields[0].':'.$fields[1]};	
 				
@@ -1510,7 +1519,11 @@ sub generate_line_data {
 			}
 		}
 		
-		push @line_data, join(",",sort keys %variant_samples);
+		if (keys %variant_samples) {
+			push @line_data, join(",",sort keys %variant_samples);
+		} else {
+			push @line_data, "Pileup shows no samples are variant";
+		}
 		if ($self->{total_affected}) {
 			push @line_data, $aff_count . ' of '.$self->{total_affected};
 		}
