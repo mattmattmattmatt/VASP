@@ -7,7 +7,7 @@ Documentation is available VASP_documentation.pdf
 To see available command line options type
 ./vasp.pl -h or ./vasp.pl -man
 
-The following files and modules are available:
+The following files and directories are available:
 
 1) vasp.pl -> script to run VASP
 
