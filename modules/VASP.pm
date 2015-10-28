@@ -264,6 +264,12 @@ sub _parse_vcf {
 			$chr = 'M';
 		}
     	
+    	if ($chr =~ /chr/) {
+	    	$chr =~ s/chr//;
+    		$self->{chr} = 1;		
+    	}
+    	
+    	
     	if (@ped_alleles != $self->{total_samples}) {
     		my $ped_data_count = @ped_alleles;
     		my $ped_total = $self->{total_samples};
@@ -468,6 +474,9 @@ sub _parse_vep {
 			$chr = 'M';
 		}
 		
+		$chr =~ s/chr//;
+		
+		
 		if ($self->{filter_output} && exists $self->{filters}{chrom}) {
 			#In general save filtering for the end to allow for comhet and phase blocks stats to be accurate but ok to filter here as above measures will occur within single chromosome
 			next unless $self->{filters}{chrom} eq $chr;
@@ -627,7 +636,11 @@ sub generate_pileups {
 		if ($self->{var_data}{$var_key}{var_type} eq 'DEL') {
 			$pileup_coord--;		
 		} 
-		print COORD "$chr\t$pileup_coord\n";
+		if ($self->{chr}) {
+			print COORD "chr$chr\t$pileup_coord\n";		
+		} else {
+			print COORD "$chr\t$pileup_coord\n";
+		}
 			
 		
 		$pileup_lookup{"$chr:$pileup_coord"} = $var_key;
@@ -651,21 +664,28 @@ sub generate_pileups {
 			$sys_call->run($mpileup_snv_command); 
 		}
 		
+		if (-z $pileup_file) {
+			modules::Exception->throw("ERROR: Pileup file is zero sized; check the pileup command run in the previous step");
+		}
+		
 		open(PILEUP,"$pileup_file") || modules::Exception->throw("Can't open pileup file $pileup_file");
 		while (<PILEUP>) {
 			my @fields = split("\t");
 			#Generate sequence and zygosity info from pileup string
 			my ($pileup_string,$zyg,$read_depth) = modules::Utils->pileup_string($fields[4],$self->{hom_cutoff},$self->{ref_cutoff});
 			
-			my $var_key_lookup = $pileup_lookup{$fields[0].':'.$fields[1]};	
+			my $chr = $fields[0];
+			$chr =~ s/chr//;
+			
+			my $var_key_lookup = $pileup_lookup{$chr.':'.$fields[1]};	
 				
-			if (!exists $pileup_lookup{$fields[0].':'.$fields[1]}){
+			if (!exists $pileup_lookup{$chr.':'.$fields[1]}){
 				if (exists $self->{filter_output} && exists $self->{filters}{chrom}) {
 					#Can happen when use previously generated pileup file and rerun with genome coordinate filters
 					next;					
 				} else {
 					#Here the is a problem as there is no information from the var_data field
-					modules::Exception->throw("ERROR: Problem with pileup line for coord $fields[0] $fields[1]");
+					modules::Exception->throw("ERROR: Problem with pileup line for coord $chr $fields[1]");
 				}
 				next; 
 			}
